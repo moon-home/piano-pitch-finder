@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>88-Key Pitch Finder - Binary Search Ear Trainer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            piano: {
+              bg: '#0d1117',
+              card: '#161b22',
+              border: '#30363d',
+              accent: '#3b82f6',
+              success: '#10b981',
+              danger: '#ef4444',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom Scrollbar for Piano Container */
+    .piano-scroll::-webkit-scrollbar {
+      height: 10px;
+    }
+    .piano-scroll::-webkit-scrollbar-track {
+      background: #161b22;
+      border-radius: 5px;
+    }
+    .piano-scroll::-webkit-scrollbar-thumb {
+      background: #30363d;
+      border-radius: 5px;
+    }
+    .piano-scroll::-webkit-scrollbar-thumb:hover {
+      background: #484f58;
+    }
+
+    /* Key styling */
+    .white-key {
+      background: linear-gradient(to bottom, #f0f0f0 0%, #ffffff 100%);
+      transition: background-color 0.2s, transform 0.05s, filter 0.2s;
+    }
+    .white-key.active-pressed {
+      background: #d0d0d0 !important;
+      transform: translateY(2px);
+    }
+    .black-key {
+      background: linear-gradient(to bottom, #2b2b2b 0%, #111111 100%);
+      transition: background-color 0.2s, transform 0.05s, filter 0.2s;
+    }
+    .black-key.active-pressed {
+      background: #444444 !important;
+      transform: translateY(2px);
+    }
+
+    /* State Highlightings */
+    .key-out-of-range {
+      opacity: 0.25 !important;
+      filter: grayscale(100%) brightness(0.5) !important;
+    }
+    .key-in-range {
+      box-shadow: inset 0 -8px 12px -2px rgba(59, 130, 246, 0.4);
+    }
+    .white-key.key-in-range {
+      background: linear-gradient(to bottom, #e2e8f0 0%, #dbeafe 100%) !important;
+    }
+    .black-key.key-in-range {
+      background: linear-gradient(to bottom, #1e293b 0%, #1e3a8a 100%) !important;
+    }
+    .key-wrong-guess {
+      background: #ef4444 !important;
+      color: white !important;
+    }
+    .key-correct-guess {
+      background: #10b981 !important;
+      color: white !important;
+      box-shadow: 0 0 20px #10b981 !important;
+    }
+  </style>
+</head>
+<body class="bg-piano-bg text-slate-200 min-h-screen flex flex-col font-sans select-none overflow-x-hidden">
+
+  <!-- Main Container -->
+  <div class="flex-1 flex flex-col justify-between max-w-7xl mx-auto w-full p-4 md:p-6 gap-6">
+
+    <!-- Header Section -->
+    <header class="flex flex-col md:flex-row justify-between items-center gap-4 border-b border-piano-border pb-4">
+      <div>
+        <h1 class="text-2xl md:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 flex items-center gap-3">
+          <i class="fa-solid font-bold fa-music text-blue-500"></i> Binary Search Pitch Finder
+        </h1>
+        <p class="text-xs md:text-sm text-slate-400 mt-1">
+          Listen to the pitch, guess its location on the 88-key piano, and narrow down the range visually!
+        </p>
+      </div>
+
+      <!-- Quick Audio Status Indicator -->
+      <div class="flex items-center gap-3 bg-piano-card px-4 py-2 rounded-xl border border-piano-border text-xs">
+        <span id="audio-status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+        <span id="audio-status-text" class="text-slate-300">Audio Ready (Fallback Synth)</span>
+      </div>
+    </header>
+
+    <!-- Main Game Dashboard -->
+    <main class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 items-start">
+      
+      <!-- Left Panel: Controls & Input -->
+      <section class="lg:col-span-5 bg-piano-card border border-piano-border rounded-2xl p-5 flex flex-col gap-5 shadow-xl">
+        
+        <!-- Action Buttons -->
+        <div class="grid grid-cols-2 gap-3">
+          <button id="btn-play" class="py-3 px-4 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/20 active:scale-95 transition flex items-center justify-center gap-2">
+            <i class="fa-solid fa-play"></i> <span id="btn-play-text">New Pitch</span>
+          </button>
+          <button id="btn-replay" class="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-piano-border font-semibold rounded-xl active:scale-95 transition flex items-center justify-center gap-2">
+            <i class="fa-solid fa-rotate-right"></i> Replay <kbd class="text-[10px] bg-slate-900 px-1.5 py-0.5 rounded text-slate-400 font-mono">Space</kbd>
+          </button>
+        </div>
+
+        <!-- Guess Input Box -->
+        <div class="space-y-2">
+          <label class="block text-xs font-medium text-slate-400 uppercase tracking-wider">Submit Your Guess</label>
+          <form id="guess-form" class="flex gap-2">
+            <input type="text" id="guess-input" placeholder="e.g. C4, F#3, or MIDI 60" 
+                   class="flex-1 bg-slate-900 border border-piano-border rounded-xl px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition text-sm font-mono">
+            <button type="submit" id="btn-submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-5 py-2.5 rounded-xl transition flex items-center gap-1 active:scale-95">
+              Guess <i class="fa-solid fa-arrow-right text-xs"></i>
+            </button>
+          </form>
+          <p class="text-[11px] text-slate-500">Tip: You can also click directly on any piano key to enter a guess!</p>
+        </div>
+
+        <!-- Binary Search Stats Card -->
+        <div class="bg-slate-900/80 border border-piano-border rounded-xl p-4 space-y-3">
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">Current Guess Count</span>
+            <span id="stat-guesses" class="text-lg font-bold text-blue-400 font-mono">0</span>
+          </div>
+          <hr class="border-piano-border">
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">Active Search Interval</span>
+            <span id="stat-range" class="text-xs font-mono font-bold text-emerald-400">A0 (MIDI 21) – C8 (MIDI 108)</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">Remaining Keys</span>
+            <span id="stat-remaining" class="text-xs font-mono text-slate-300">88 keys</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">Theoretical Max Steps</span>
+            <span class="text-xs font-mono text-slate-400">⌈log₂ 88⌉ = 7 steps</span>
+          </div>
+        </div>
+
+        <!-- Interactive Settings / Toggles -->
+        <div class="flex items-center justify-between pt-2 border-t border-piano-border/50">
+          <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <input type="checkbox" id="toggle-key-labels" class="rounded bg-slate-900 border-piano-border text-blue-600 focus:ring-0" checked>
+            Show Key Labels (Octaves)
+          </label>
+          <button id="btn-reset" class="text-xs text-slate-400 hover:text-slate-200 transition underline">Reset Session</button>
+        </div>
+
+      </section>
+
+      <!-- Right Panel: History / Logs & Guidance -->
+      <section class="lg:col-span-7 bg-piano-card border border-piano-border rounded-2xl p-5 flex flex-col gap-4 shadow-xl h-full min-h-[280px]">
+        <h2 class="text-xs font-medium text-slate-400 uppercase tracking-wider flex items-center gap-2">
+          <i class="fa-solid fa-list-check text-blue-400"></i> Guess History & Interval Splitting
+        </h2>
+
+        <!-- Victory Banner (Hidden by default) -->
+        <div id="victory-card" class="hidden bg-emerald-950/80 border border-emerald-500/50 rounded-xl p-4 text-center space-y-2 animate-bounce-short">
+          <div class="inline-flex p-3 bg-emerald-500/20 text-emerald-400 rounded-full text-2xl mb-1">
+            <i class="fa-solid fa-trophy"></i>
+          </div>
+          <h3 class="text-lg font-bold text-emerald-300">Pitch Matched Successfully!</h3>
+          <p id="victory-details" class="text-xs text-emerald-200/80">You found note <span class="font-bold text-white">C4</span> in <span class="font-bold text-white">4 guesses</span>!</p>
+          <button id="btn-play-again" class="mt-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-1.5 px-4 rounded-lg transition">
+            Play Next Pitch
+          </button>
+        </div>
+
+        <!-- History Log List -->
+        <div id="history-list" class="flex-1 overflow-y-auto max-h-[220px] space-y-2 pr-1 text-xs font-mono">
+          <div class="text-slate-500 text-center py-8 italic font-sans">
+            No guesses submitted yet. Click "New Pitch" to start!
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Visual Keyboard Section -->
+    <section class="bg-piano-card border border-piano-border rounded-2xl p-4 shadow-2xl flex flex-col gap-3">
+      <div class="flex justify-between items-center text-xs text-slate-400 px-1">
+        <span class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span> Search Interval
+          <span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block ml-2"></span> Wrong Boundaries
+          <span class="w-2.5 h-2.5 rounded-full bg-slate-700 inline-block ml-2"></span> Excluded Keys
+        </span>
+        <span class="text-slate-500">Scroll horizontally if viewing on smaller displays</span>
+      </div>
+
+      <!-- Scrollable 88-Key Piano Container -->
+      <div class="piano-scroll overflow-x-auto pb-2 pt-1 w-full flex justify-start rounded-xl">
+        <div id="piano-keyboard" class="relative flex min-w-max h-48 select-none bg-slate-950 p-2 rounded-xl border border-slate-800">
+          <!-- Piano keys will be dynamically inserted here -->
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    // --- Constant Definitions & Musical Utilities ---
+    const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const MIN_MIDI = 21; // A0
+    const MAX_MIDI = 108; // C8
+    const TOTAL_KEYS = 88;
+
+    function midiToNoteName(midi) {
+      const octave = Math.floor(midi / 12) - 1;
+      const noteIndex = midi % 12;
+      return NOTE_NAMES[noteIndex] + octave;
+    }
+
+    function isBlackKey(midi) {
+      const noteIndex = midi % 12;
+      return [1, 3, 6, 8, 10].includes(noteIndex);
+    }
+
+    function parseNoteInput(inputStr) {
+      if (!inputStr) return null;
+      let str = inputStr.trim().toUpperCase();
+      
+      // Case 1: MIDI number input
+      if (/^\d+$/.test(str)) {
+        const val = parseInt(str, 10);
+        if (val >= MIN_MIDI && val <= MAX_MIDI) return val;
+        return null;
+      }
+
+      // Case 2: Note name input (e.g. C4, F#3, Db3)
+      str = str.replace("DB", "C#").replace("EB", "D#").replace("GB", "F#").replace("AB", "G#").replace("BB", "A#");
+      
+      const match = str.match(/^([A-G]#?)(-?\d+)$/);
+      if (match) {
+        const name = match[1];
+        const octave = parseInt(match[2], 10);
+        const nameIdx = NOTE_NAMES.indexOf(name);
+        if (nameIdx !== -1) {
+          const midi = (octave + 1) * 12 + nameIdx;
+          if (midi >= MIN_MIDI && midi <= MAX_MIDI) return midi;
+        }
+      }
+      return null;
+    }
+
+    // --- Audio System Setup ---
+    let sampler = null;
+    let fallbackSynth = null;
+    let audioLoaded = false;
+
+    function initAudio() {
+      // Basic Fallback Synth using Tone.PolySynth
+      fallbackSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.005, decay: 1.5, sustain: 0.1, release: 1 }
+      }).toDestination();
+
+      // Sampled Piano Sound via Salamander Grand Piano samples
+      sampler = new Tone.Sampler({
+        urls: {
+          A0: "A0.mp3",
+          C1: "C1.mp3",
+          "D#1": "Ds1.mp3",
+          "F#1": "Fs1.mp3",
+          A1: "A1.mp3",
+          C2: "C2.mp3",
+          "D#2": "Ds2.mp3",
+          "F#2": "Fs2.mp3",
+          A2: "A2.mp3",
+          C3: "C3.mp3",
+          "D#3": "Ds3.mp3",
+          "F#3": "Fs3.mp3",
+          A3: "A3.mp3",
+          C4: "C4.mp3",
+          "D#4": "Ds4.mp3",
+          "F#4": "Fs4.mp3",
+          A4: "A4.mp3",
+          C5: "C5.mp3",
+          "D#5": "Ds5.mp3",
+          "F#5": "Fs5.mp3",
+          A5: "A5.mp3",
+          C6: "C6.mp3",
+          "D#6": "Ds6.mp3",
+          "F#6": "Fs6.mp3",
+          A6: "A6.mp3",
+          C7: "C7.mp3",
+          "D#7": "Ds7.mp3",
+          "F#7": "Fs7.mp3",
+          A7: "A7.mp3",
+          C8: "C8.mp3"
+        },
+        baseUrl: "https://tonejs.github.io/audio/salamander/",
+        onload: () => {
+          audioLoaded = true;
+          document.getElementById('audio-status-dot').className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+          document.getElementById('audio-status-text').innerText = "Sampled Grand Piano Ready";
+        }
+      }).toDestination();
+    }
+
+    function playTone(midi, duration = "8n") {
+      Tone.start();
+      const noteName = midiToNoteName(midi);
+      if (audioLoaded && sampler) {
+        sampler.triggerAttackRelease(noteName, duration);
+      } else if (fallbackSynth) {
+        fallbackSynth.triggerAttackRelease(noteName, duration);
+      }
+    }
+
+    function playSuccessChime() {
+      Tone.start();
+      const now = Tone.now();
+      if (fallbackSynth) {
+        fallbackSynth.triggerAttackRelease("C5", "8n", now);
+        fallbackSynth.triggerAttackRelease("E5", "8n", now + 0.1);
+        fallbackSynth.triggerAttackRelease("G5", "8n", now + 0.2);
+        fallbackSynth.triggerAttackRelease("C6", "4n", now + 0.3);
+      }
+    }
+
+    // --- State Management ---
+    let state = {
+      targetMidi: null,
+      lowMidi: MIN_MIDI,
+      highMidi: MAX_MIDI,
+      guessCount: 0,
+      guesses: [],
+      isSolved: false,
+      showLabels: true
+    };
+
+    // --- Keyboard UI Generation ---
+    const pianoKeyboardEl = document.getElementById('piano-keyboard');
+
+    function renderKeyboard() {
+      pianoKeyboardEl.innerHTML = '';
+
+      let whiteKeyCount = 0;
+      for (let m = MIN_MIDI; m <= MAX_MIDI; m++) {
+        if (!isBlackKey(m)) whiteKeyCount++;
+      }
+
+      const whiteKeyWidth = 28;
+      const blackKeyWidth = 18;
+
+      let currentWhiteIndex = 0;
+
+      // First pass: Render White Keys
+      for (let m = MIN_MIDI; m <= MAX_MIDI; m++) {
+        if (!isBlackKey(m)) {
+          const keyEl = document.createElement('div');
+          keyEl.dataset.midi = m;
+          keyEl.className = `white-key relative flex-shrink-0 rounded-b-md border border-slate-300 text-slate-800 font-mono text-[10px] flex flex-col justify-end items-center pb-2 cursor-pointer shadow-md`;
+          keyEl.style.width = `${whiteKeyWidth}px`;
+          keyEl.style.height = `100%`;
+
+          const label = document.createElement('span');
+          label.className = 'key-label font-bold pointer-events-none opacity-70';
+          label.innerText = (m % 12 === 0 || m === MIN_MIDI) ? midiToNoteName(m) : '';
+          keyEl.appendChild(label);
+
+          keyEl.addEventListener('click', () => handleKeyClick(m));
+          pianoKeyboardEl.appendChild(keyEl);
+
+          currentWhiteIndex++;
+        }
+      }
+
+      // Second pass: Render Overlay Black Keys
+      currentWhiteIndex = 0;
+      for (let m = MIN_MIDI; m <= MAX_MIDI; m++) {
+        if (isBlackKey(m)) {
+          const keyEl = document.createElement('div');
+          keyEl.dataset.midi = m;
+          keyEl.className = `black-key absolute rounded-b-md border border-slate-900 z-10 cursor-pointer shadow-lg`;
+          keyEl.style.width = `${blackKeyWidth}px`;
+          keyEl.style.height = `60%`;
+          
+          const leftPos = (currentWhiteIndex * whiteKeyWidth) - (blackKeyWidth / 2) + 8;
+          keyEl.style.left = `${leftPos}px`;
+
+          keyEl.addEventListener('click', () => handleKeyClick(m));
+          pianoKeyboardEl.appendChild(keyEl);
+        } else {
+          currentWhiteIndex++;
+        }
+      }
+
+      updateKeyboardHighlights();
+    }
+
+    function updateKeyboardHighlights() {
+      const keys = pianoKeyboardEl.querySelectorAll('[data-midi]');
+      keys.forEach(keyEl => {
+        const m = parseInt(keyEl.dataset.midi, 10);
+        const labelEl = keyEl.querySelector('.key-label');
+
+        if (labelEl) {
+          labelEl.style.display = state.showLabels ? 'block' : 'none';
+        }
+
+        keyEl.classList.remove('key-out-of-range', 'key-in-range', 'key-wrong-guess', 'key-correct-guess');
+
+        if (state.targetMidi === null) return;
+
+        const wrongGuess = state.guesses.find(g => g.guessMidi === m && g.result !== 'correct');
+        const correctGuess = state.guesses.find(g => g.guessMidi === m && g.result === 'correct');
+
+        if (correctGuess) {
+          keyEl.classList.add('key-correct-guess');
+        } else if (wrongGuess) {
+          keyEl.classList.add('key-wrong-guess');
+        } else if (m >= state.lowMidi && m <= state.highMidi) {
+          keyEl.classList.add('key-in-range');
+        } else {
+          keyEl.classList.add('key-out-of-range');
+        }
+      });
+    }
+
+    function animateKeyPress(midi) {
+      const keyEl = pianoKeyboardEl.querySelector(`[data-midi="${midi}"]`);
+      if (keyEl) {
+        keyEl.classList.add('active-pressed');
+        setTimeout(() => keyEl.classList.remove('active-pressed'), 200);
+      }
+    }
+
+    // --- Game Logic ---
+    function startNewGame() {
+      state.targetMidi = Math.floor(Math.random() * (MAX_MIDI - MIN_MIDI + 1)) + MIN_MIDI;
+      state.lowMidi = MIN_MIDI;
+      state.highMidi = MAX_MIDI;
+      state.guessCount = 0;
+      state.guesses = [];
+      state.isSolved = false;
+
+      document.getElementById('stat-guesses').innerText = '0';
+      document.getElementById('stat-range').innerText = `${midiToNoteName(MIN_MIDI)} (${MIN_MIDI}) – ${midiToNoteName(MAX_MIDI)} (${MAX_MIDI})`;
+      document.getElementById('stat-remaining').innerText = `${TOTAL_KEYS} keys`;
+      document.getElementById('victory-card').classList.add('hidden');
+      document.getElementById('history-list').innerHTML = `<div class="text-slate-500 text-center py-6 italic font-sans">Game started. Pitch played! Submit your guess.</div>`;
+      document.getElementById('btn-play-text').innerText = "New Pitch";
+
+      updateKeyboardHighlights();
+      playTone(state.targetMidi, "2n");
+    }
+
+    function handleGuess(guessMidi) {
+      if (state.targetMidi === null) {
+        startNewGame();
+        return;
+      }
+      if (state.isSolved) return;
+
+      animateKeyPress(guessMidi);
+      playTone(guessMidi, "8n");
+
+      state.guessCount++;
+      document.getElementById('stat-guesses').innerText = state.guessCount;
+
+      const guessNoteName = midiToNoteName(guessMidi);
+      let result = '';
+
+      if (guessMidi === state.targetMidi) {
+        result = 'correct';
+        state.isSolved = true;
+        state.guesses.push({ guessMidi, result });
+
+        playSuccessChime();
+        document.getElementById('victory-details').innerHTML = 
+          `You identified <span class="font-bold text-white">${guessNoteName} (MIDI ${guessMidi})</span> in <span class="font-bold text-white">${state.guessCount}</span> guesses!`;
+        document.getElementById('victory-card').classList.remove('hidden');
+
+        addHistoryEntry(state.guessCount, guessNoteName, guessMidi, 'CORRECT! Perfect match 🎉', 'text-emerald-400 bg-emerald-950/40 border-emerald-800');
+
+      } else if (guessMidi < state.targetMidi) {
+        result = 'low';
+        if (guessMidi >= state.lowMidi) {
+          state.lowMidi = guessMidi + 1;
+        }
+        state.guesses.push({ guessMidi, result });
+        addHistoryEntry(state.guessCount, guessNoteName, guessMidi, 'TOO LOW ⬆️ Range shifted up', 'text-amber-400 bg-amber-950/20 border-amber-900/50');
+
+      } else {
+        result = 'high';
+        if (guessMidi <= state.highMidi) {
+          state.highMidi = guessMidi - 1;
+        }
+        state.guesses.push({ guessMidi, result });
+        addHistoryEntry(state.guessCount, guessNoteName, guessMidi, 'TOO HIGH ⬇️ Range shifted down', 'text-sky-400 bg-sky-950/20 border-sky-900/50');
+      }
+
+      const remainingKeys = Math.max(0, state.highMidi - state.lowMidi + 1);
+      document.getElementById('stat-range').innerText = `${midiToNoteName(state.lowMidi)} (${state.lowMidi}) – ${midiToNoteName(state.highMidi)} (${state.highMidi})`;
+      document.getElementById('stat-remaining').innerText = `${remainingKeys} keys`;
+
+      updateKeyboardHighlights();
+    }
+
+    function addHistoryEntry(step, noteName, midi, message, styleClasses) {
+      const historyListEl = document.getElementById('history-list');
+      if (step === 1) historyListEl.innerHTML = '';
+
+      const item = document.createElement('div');
+      item.className = `p-2.5 rounded-xl border flex items-center justify-between text-xs transition ${styleClasses}`;
+      item.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-bold">${step}</span>
+          <span class="font-bold">${noteName} <span class="text-[10px] opacity-70">(MIDI ${midi})</span></span>
+        </div>
+        <span class="font-sans font-medium text-[11px]">${message}</span>
+      `;
+      historyListEl.prepend(item);
+    }
+
+    function handleKeyClick(midi) {
+      const inputEl = document.getElementById('guess-input');
+      inputEl.value = midiToNoteName(midi);
+      handleGuess(midi);
+    }
+
+    // --- Event Listeners ---
+    document.addEventListener('DOMContentLoaded', () => {
+      initAudio();
+      renderKeyboard();
+
+      document.getElementById('btn-play').addEventListener('click', () => {
+        startNewGame();
+      });
+
+      document.getElementById('btn-replay').addEventListener('click', () => {
+        if (state.targetMidi !== null) {
+          playTone(state.targetMidi, "2n");
+        } else {
+          startNewGame();
+        }
+      });
+
+      document.getElementById('btn-play-again').addEventListener('click', () => {
+        startNewGame();
+      });
+
+      document.getElementById('btn-reset').addEventListener('click', () => {
+        state.targetMidi = null;
+        state.lowMidi = MIN_MIDI;
+        state.highMidi = MAX_MIDI;
+        state.guessCount = 0;
+        state.guesses = [];
+        state.isSolved = false;
+        
+        document.getElementById('stat-guesses').innerText = '0';
+        document.getElementById('stat-range').innerText = `${midiToNoteName(MIN_MIDI)} (${MIN_MIDI}) – ${midiToNoteName(MAX_MIDI)} (${MAX_MIDI})`;
+        document.getElementById('stat-remaining').innerText = `${TOTAL_KEYS} keys`;
+        document.getElementById('victory-card').classList.add('hidden');
+        document.getElementById('history-list').innerHTML = `<div class="text-slate-500 text-center py-8 italic font-sans">No guesses submitted yet. Click "New Pitch" to start!</div>`;
+        document.getElementById('btn-play-text').innerText = "Start Training";
+        updateKeyboardHighlights();
+      });
+
+      document.getElementById('guess-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const inputEl = document.getElementById('guess-input');
+        const parsedMidi = parseNoteInput(inputEl.value);
+
+        if (parsedMidi !== null) {
+          handleGuess(parsedMidi);
+          inputEl.value = '';
+        } else {
+          inputEl.classList.add('border-red-500');
+          setTimeout(() => inputEl.classList.remove('border-red-500'), 1000);
+        }
+      });
+
+      document.getElementById('toggle-key-labels').addEventListener('change', (e) => {
+        state.showLabels = e.target.checked;
+        updateKeyboardHighlights();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT') {
+          e.preventDefault();
+          if (state.targetMidi !== null) {
+            playTone(state.targetMidi, "2n");
+          }
+        }
+      });
+    });
+  </script>
+</body>
+</html>
